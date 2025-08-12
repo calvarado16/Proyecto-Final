@@ -9,3 +9,8 @@ secrets/
 .env
 *.pem
 
+
+secrets/
+.env
+*.pem
+
