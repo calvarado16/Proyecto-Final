@@ -1,0 +1,6 @@
+
+# secretos
+secrets/
+.env
+*.pem
+
