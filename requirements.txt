@@ -1,7 +1,7 @@
 fastapi==0.115.14
 pymongo==4.13.2
 uvicorn==0.34.3
-URI = mongodb+srv://calvarado04:Andres504@cluster0.etwaeya.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+
 
 
 
