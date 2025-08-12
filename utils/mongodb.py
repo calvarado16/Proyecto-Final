@@ -7,7 +7,7 @@ load_dotenv()
 
 # Try both variable names for compatibility
 DB = os.getenv("DATABASE_NAME") or os.getenv("MONGO_DB_NAME")
-URI = os.getenv("MONGODB_URI") or os.getenv("URI")
+URI = os.getenv("MONGO_URI") or os.getenv("URI")
 
 # Validate that we have the required environment variables
 if not DB:
