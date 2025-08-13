@@ -27,8 +27,8 @@ load_dotenv()
 DB = os.getenv("MONGO_DB_NAME")
 URI = os.getenv("URI")
 
-cred = credentials.Certificate("secrets/taxfixer-secrets.json")
-firebase_admin.initialize_app(cred)
+#cred = credentials.Certificate("secrets/taxfixer-secrets.json")
+#firebase_admin.initialize_app(cred)
 
 def initialize_firebase():
     if firebase_admin._apps:
