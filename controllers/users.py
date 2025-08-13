@@ -39,7 +39,8 @@ def initialize_firebase():
 
         if firebase_creds_base64:
             firebase_creds_json = base64.b64decode(firebase_creds_base64).decode('utf-8')
-            firebase_creds = json.loads(firebase_creds)
+            firebase_creds = json.loads(firebase_creds_json)
+            cred = credentials.Certificate(firebase_creds)
             firebase_admin.initialize_app(cred)
             logger.info("Firebase initialized with environment variable credentials")
     
