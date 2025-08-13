@@ -85,11 +85,11 @@ jobs:
             RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           run: |
             echo "starting deployment..."
-            railway up --service "servicios_api" || \
-            railway up --service servicios_api || \ 
-            railway up --service web || \  
-            railway up --service api || \
-            railway up --service app || \
-            railway up --service servicios || \
-            railway up --service backend || \
+            railway up --service "servicios_api" || 
+            railway up --service servicios_api ||  
+            railway up --service web ||  
+            railway up --service api || 
+            railway up --service app || 
+            railway up --service servicios || 
+            railway up --service backend || 
             (echo "creating new service and deploying" && railway up) 
