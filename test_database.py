@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def test_env_variables():
-    mongodb_uri = os.getenv("MONGODB_URI")
+    mongodb_uri = os.getenv("MONGO_URI")
 
-    assert mongodb_uri is not None, "MONGODB_Uri no esta configurada"
+    assert mongodb_uri is not None, "MONGO_Uri no esta configurada"
     print( f"Datbase: {mongodb_uri} " )
 
 def test_connect():
