@@ -5,20 +5,29 @@ from pymongo.server_api import ServerApi
 
 load_dotenv()
 
-# Try both variable names for compatibility
-DB = os.getenv("DATABASE_NAME") or os.getenv("MONGO_DB_NAME")
-URI = os.getenv("MONGO_URI") or os.getenv("URI")
+# Lee distintos nombres de variables de entorno para ser compatible
+DB = (
+    os.getenv("MONGO_DB_NAME")
+    or os.getenv("DATABASE_NAME")
+    or os.getenv("DB_NAME")
+)
+URI = (
+    os.getenv("MONGODB_URI")   # recomendado para Atlas/Railway
+    or os.getenv("MONGO_URI")
+    or os.getenv("MONGO_URL")
+    or os.getenv("URI")
+)
 
-# Validate that we have the required environment variables
 if not DB:
-    raise ValueError("Database name not found. Set DATABASE_NAME or MONGO_DB_NAME environment variable")
+    raise ValueError("Database name not found. Set MONGO_DB_NAME / DATABASE_NAME / DB_NAME.")
 if not URI:
-    raise ValueError("MongoDB URI not found. Set MONGODB_URI or URI environment variable")
+    raise ValueError("MongoDB URI not found. Set MONGODB_URI / MONGO_URI / MONGO_URL / URI.")
+
+_client: MongoClient | None = None
 
 
-_client = None
-
-def get_mongo_client():
+def get_mongo_client() -> MongoClient:
+    """Devuelve un cliente MongoDB singleton."""
     global _client
     if _client is None:
         _client = MongoClient(
@@ -26,24 +35,25 @@ def get_mongo_client():
             server_api=ServerApi("1"),
             tls=True,
             tlsAllowInvalidCertificates=True,
-            serverSelectionTimeoutMS=5000  # Timeout más corto
+            serverSelectionTimeoutMS=10_000,  # 10s
         )
     return _client
 
-def get_collection(col):
-    """Obtiene una colección de MongoDB"""
-    client = get_mongo_client()
-    return client[DB][col]
 
-def t_connection():
+def get_collection(col: str):
+    """Obtiene una colección de la BD configurada."""
+    return get_mongo_client()[DB][col]
+
+
+def test_connection() -> bool:
+    """Hace ping a Mongo para verificar conectividad."""
     try:
-        client = get_mongo_client()
-        client.admin.command("ping")
+        get_mongo_client().admin.command("ping")
         return True
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
         return False
 
 
-
-
+# Alias por compatibilidad con código que importe t_connection
+t_connection = test_connection
