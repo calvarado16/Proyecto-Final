@@ -133,6 +133,10 @@ async def create_user_endpoint(user: User) -> User:
 async def login_access(l: Login):
     return await login(l)
 
+
+    return {"email": email, "found": bool(u), "doc": _serialize_user(u)}
+
+
 # ============================
 # Arranque
 # ============================

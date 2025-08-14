@@ -34,7 +34,6 @@ def initialize_firebase():
             firebase_admin.initialize_app(cred)
             logger.info("Firebase initialized with environment variable credentials")
         else:
-            # Fallback local (asegúrate de que el archivo exista en ese path)
             cred = credentials.Certificate("secrets/dulceria-secret.json")
             firebase_admin.initialize_app(cred)
             logger.info("Firebase initialized with JSON file")
@@ -47,43 +46,29 @@ initialize_firebase()
 
 
 async def create_user(user: User) -> User:
-    """
-    Crea el usuario en Firebase (si no existe) y luego lo inserta en Mongo.
-    Devuelve el modelo User (sin password en claro, enmascarado).
-    """
-    # 0) Validar duplicado en Mongo
     coll = get_collection("users")
     if coll.find_one({"email": user.email}):
         raise HTTPException(status_code=409, detail="Email ya registrado en la base de datos")
 
-    # 1) Verificar si ya existe en Firebase
     fb_user = None
     try:
         fb_user = firebase_auth.get_user_by_email(user.email)
         logger.info("Email ya existe en Firebase, se reutilizará el UID.")
     except Exception:
-        # No existe en Firebase o error transitorio: continuamos y tratamos de crearlo
         fb_user = None
 
     created_in_firebase = False
     try:
-        # 2) Crear en Firebase si no existe
         if not fb_user:
             fb_user = firebase_auth.create_user(
                 email=user.email,
                 password=user.password,
             )
             created_in_firebase = True
-
     except Exception as e:
         logger.warning(f"[FIREBASE] create_user error: {repr(e)}")
-        # Error claro al cliente
-        raise HTTPException(
-            status_code=400,
-            detail=f"Error al registrar usuario en Firebase: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Error al registrar usuario en Firebase: {str(e)}")
 
-    # 3) Insertar en Mongo (sin password) y devolver objeto User
     try:
         new_user = User(
             name=user.name,
@@ -93,20 +78,15 @@ async def create_user(user: User) -> User:
         )
 
         user_dict = new_user.model_dump(exclude={"id", "password"})
-        # Respetar defaults del modelo: active=True, admin=False
-        if "active" not in user_dict:
-            user_dict["active"] = True
-        if "admin" not in user_dict:
-            user_dict["admin"] = False
+        user_dict.setdefault("active", True)
+        user_dict.setdefault("admin", False)
 
         inserted = coll.insert_one(user_dict)
         new_user.id = str(inserted.inserted_id)
-        new_user.password = "*********"  # Enmascarar
+        new_user.password = "*********"
 
         return new_user
-
     except Exception as e:
-        # Rollback en Firebase solo si lo creamos en este request
         if created_in_firebase and fb_user is not None:
             try:
                 firebase_auth.delete_user(fb_user.uid)
@@ -117,20 +97,12 @@ async def create_user(user: User) -> User:
 
 
 async def login(user: Login) -> dict:
-    """
-    Autentica con Firebase (REST) y devuelve tu JWT propio en el campo `idToken`,
-    manteniendo tu estructura actual.
-    """
     api_key = os.getenv("FIREBASE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="FIREBASE_API_KEY no configurada")
 
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
-    payload = {
-        "email": user.email,
-        "password": user.password,
-        "returnSecureToken": True
-    }
+    payload = {"email": user.email, "password": user.password, "returnSecureToken": True}
 
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -140,30 +112,35 @@ async def login(user: Login) -> dict:
         raise HTTPException(status_code=502, detail=f"Error comunicando con Firebase: {str(e)}")
 
     if "error" in response_data:
-        raise HTTPException(
-            status_code=400,
-            detail="Error al autenticar usuario"
-        )
+        raise HTTPException(status_code=400, detail="Error al autenticar usuario")
 
     coll = get_collection("users")
     user_info = coll.find_one({"email": user.email})
-
     if not user_info:
-        raise HTTPException(
-            status_code=404,
-            detail="Usuario no encontrado en la base de datos"
-        )
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en la base de datos")
 
-    # Mantengo tu estructura: el JWT propio va en el campo `idToken`
-    return {
-        "message": "Usuario Autenticado correctamente",
-        "idToken": create_jwt_token(
-            user_info.get("name", ""),
-            user_info.get("lastname", ""),
-            user_info["email"],
-            user_info.get("active", True),
-            user_info.get("admin", False),
-            str(user_info["_id"])
-        )
+    # ✅ FIX: usar argumentos nominales correctos
+    token = create_jwt_token(
+        id=str(user_info["_id"]),
+        firstname=user_info.get("name", ""),
+        lastname=user_info.get("lastname", ""),
+        email=user_info["email"],
+        active=user_info.get("active", True),
+        admin=user_info.get("admin", False),
+    )
+
+    # Devolver info de usuario para el front (opcional, pero útil)
+    user_out = {
+        "id": str(user_info["_id"]),
+        "firstname": user_info.get("name", ""),
+        "lastname": user_info.get("lastname", ""),
+        "email": user_info["email"],
+        "active": bool(user_info.get("active", True)),
+        "admin": bool(user_info.get("admin", False)),
     }
 
+    return {
+        "message": "Usuario Autenticado correctamente",
+        "idToken": token,
+        "user": user_out
+    }
