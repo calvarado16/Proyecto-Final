@@ -12,26 +12,28 @@ async def list_professions(request: Request):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @validateuser
-async def create_profession(prof: Profession, request: Request):
+async def create_profession_route(prof: Profession, request: Request):
     return await controller.create_profession(prof, actor_id=request.state.id)
 
 @router.put("/{id}")
 @validateuser
-async def update_profession(id: str, prof: Profession, request: Request):
+async def update_profession_route(
+    id: str = Path(..., description="ID de la profesión"),
+    prof: Profession = None,
+    request: Request = None
+):
     return await controller.update_profession(
         id,
         prof,
-        actor_id=request.state.id,
-        is_admin=bool(getattr(request.state, "admin", False))
+        actor_id=request.state.id
     )
 
 @router.delete("/{id}")
 @validateuser
-async def delete_profession(id: str, request: Request):
+async def delete_profession_route(id: str, request: Request):
     return await controller.delete_profession(
         id,
-        actor_id=request.state.id,
-        is_admin=bool(getattr(request.state, "admin", False))
+        actor_id=request.state.id
     )
 
 
