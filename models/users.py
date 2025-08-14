@@ -32,17 +32,7 @@ class User(BaseModel):
     admin: bool = Field(
         default=False
     )
-    
-    
-    client: bool = Field(
-        default=True
-    )
-    
-    
-    profesional: bool = Field(
-        default=False
-    )
-    
+        
     password: str = Field(
         min_length=8,
         max_length=64,
