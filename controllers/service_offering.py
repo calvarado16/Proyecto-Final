@@ -6,34 +6,100 @@ from models.service_offering import ServiceOffering
 col = get_collection("service_offering")
 prof_col = get_collection("profession")
 
-def _to_out(doc: dict) -> dict | None:
-    if not doc:
-        return None
-    doc["id"] = str(doc.pop("_id"))
-    doc["id_profession"] = str(doc["id_profession"])
-    if "created_by" in doc and doc["created_by"] is not None:
-        doc["created_by"] = str(doc["created_by"])
-    return doc
+# -----------------------------
+# Pipelines embebidos
+# -----------------------------
+def _project_stage():
+    return {
+        "$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "id_profession": {"$toString": "$id_profession"},
+            "profession_name": "$profession.name",
+            "description": 1,
+            "estimated_price": 1,
+            "estimated_duration": 1,
+            "active": 1,
+            "created_by": {"$toString": "$created_by"},
+        }
+    }
 
+def _list_pipeline(*, active_only: bool = True, owner_id: str | None = None):
+    match: dict = {}
+    if active_only:
+        match["active"] = True
+    if owner_id:
+        try:
+            match["created_by"] = ObjectId(owner_id)
+        except Exception:
+            # si viene mal, ignoramos el filtro de dueño
+            pass
+
+    return [
+        {"$match": match},
+        {
+            "$lookup": {
+                "from": "profession",
+                "localField": "id_profession",
+                "foreignField": "_id",
+                "as": "profession",
+            }
+        },
+        {"$unwind": {"path": "$profession", "preserveNullAndEmptyArrays": True}},
+        _project_stage(),
+    ]
+
+def _by_id_pipeline(service_id: str):
+    return [
+        {"$match": {"_id": ObjectId(service_id)}},
+        {
+            "$lookup": {
+                "from": "profession",
+                "localField": "id_profession",
+                "foreignField": "_id",
+                "as": "profession",
+            }
+        },
+        {"$unwind": {"path": "$profession", "preserveNullAndEmptyArrays": True}},
+        _project_stage(),
+    ]
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _ensure_objectid(s: str, name: str = "id") -> ObjectId:
+    try:
+        return ObjectId(s)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid {name}")
+
+def _get_by_id_agg_str(service_id: str) -> dict:
+    """Devuelve 1 service offering con lookup y proyección usando aggregate."""
+    pipe = _by_id_pipeline(service_id)
+    docs = list(col.aggregate(pipe))
+    if not docs:
+        raise HTTPException(status_code=404, detail="Service not found")
+    return docs[0]
+
+
+# -----------------------------
+# Endpoints (lógica)
+# -----------------------------
 async def list_services_active():
-    cursor = col.find({"active": True})
-    return [_to_out(d) for d in cursor]
+    """Mantiene tu firma original pero ahora usa aggregate + lookup."""
+    pipe = _list_pipeline(active_only=True)
+    return list(col.aggregate(pipe))
 
 async def create_service(service: ServiceOffering, *, actor_id: str):
     # validar profesión
-    try:
-        pid = ObjectId(service.id_profession)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid id_profession")
+    pid = _ensure_objectid(service.id_profession, "id_profession")
 
     if not prof_col.find_one({"_id": pid, "active": True}):
         raise HTTPException(status_code=404, detail="Profession not found or inactive")
 
     # dueño
-    try:
-        owner = ObjectId(actor_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid actor id")
+    owner = _ensure_objectid(actor_id, "actor id")
 
     res = col.insert_one({
         "id_profession": pid,
@@ -43,15 +109,14 @@ async def create_service(service: ServiceOffering, *, actor_id: str):
         "active": service.active,
         "created_by": owner,
     })
-    return _to_out(col.find_one({"_id": res.inserted_id}))
+
+    # devolver ya con lookup/proyección
+    return _get_by_id_agg_str(str(res.inserted_id))
 
 # mantenemos firma con is_admin para no romper rutas, pero NO se usa (solo dueño puede)
 async def update_service(id: str, service: ServiceOffering, *, actor_id: str, is_admin: bool):
-    try:
-        _id = ObjectId(id)
-        pid = ObjectId(service.id_profession)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid id or id_profession")
+    _id = _ensure_objectid(id, "id")
+    pid = _ensure_objectid(service.id_profession, "id_profession")
 
     if not prof_col.find_one({"_id": pid, "active": True}):
         raise HTTPException(status_code=404, detail="Profession not found or inactive")
@@ -60,11 +125,7 @@ async def update_service(id: str, service: ServiceOffering, *, actor_id: str, is
     if not current:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    # solo dueño
-    try:
-        actor = ObjectId(actor_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid actor id")
+    actor = _ensure_objectid(actor_id, "actor id")
     if current.get("created_by") != actor:
         raise HTTPException(status_code=403, detail="Not owner of this service")
 
@@ -75,29 +136,24 @@ async def update_service(id: str, service: ServiceOffering, *, actor_id: str, is
         "estimated_duration": service.estimated_duration,
         "active": service.active,
     }})
-    return _to_out(col.find_one({"_id": _id}))
+
+    return _get_by_id_agg_str(id)
 
 # mantenemos firma con is_admin para no romper rutas, pero NO se usa (solo dueño puede)
 async def delete_service(id: str, *, actor_id: str, is_admin: bool):
-    try:
-        _id = ObjectId(id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid id")
+    _id = _ensure_objectid(id, "id")
 
     current = col.find_one({"_id": _id})
     if not current:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    # solo dueño
-    try:
-        actor = ObjectId(actor_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid actor id")
+    actor = _ensure_objectid(actor_id, "actor id")
     if current.get("created_by") != actor:
         raise HTTPException(status_code=403, detail="Not owner of this service")
 
     col.update_one({"_id": _id}, {"$set": {"active": False}})
     return {"ok": True}
+
 
 
 

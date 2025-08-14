@@ -1,69 +1,49 @@
+# pipelines/service_offering.py
 from bson import ObjectId
 
-def get_full_service_offering_pipeline(service_id: str) -> list:
-    """
-    Devuelve un servicio con detalles del profesional, reseñas y reservas.
-    Maneja casos donde id_profesional no es un ObjectId válido.
-    """
+def list_services_pipeline(*, include_inactive: bool = False) -> list:
+    match_stage = {"$match": {}} if include_inactive else {"$match": {"active": True}}
     return [
-        {"$match": {"_id": ObjectId(service_id)}},
-
-        # Convertir id_profesional a ObjectId de forma segura
-        {"$addFields": {
-            "id_profesional_obj": {
-                "$convert": {
-                    "input": "$id_profesional",
-                    "to": "objectId",
-                    "onError": None,
-                    "onNull": None
-                }
-            }
-        }},
-
-        # Filtrar si la conversión falló
-        {"$match": {
-            "id_profesional_obj": {"$ne": None}
-        }},
-
-        # Profesional asociado
+        match_stage,
         {"$lookup": {
-            "from": "users",
-            "localField": "id_profesional_obj",
+            "from": "profession",
+            "localField": "id_profession",
             "foreignField": "_id",
-            "as": "profesional"
+            "as": "profession"
         }},
-        {"$unwind": "$profesional"},
-
-        # Reviews asociadas
-        {"$lookup": {
-            "from": "reviews",
-            "localField": "_id",
-            "foreignField": "id_service_offering",
-            "as": "reviews"
-        }},
-
-        # Reservas asociadas
-        {"$lookup": {
-            "from": "reservation_service",
-            "localField": "_id",
-            "foreignField": "id_service_offering",
-            "as": "reservations"
-        }},
-
-        # Proyección final
+        {"$unwind": {"path": "$profession", "preserveNullAndEmptyArrays": True}},
         {"$project": {
             "_id": 0,
             "id": {"$toString": "$_id"},
-            "nombre": 1,
-            "descripcion": 1,
-            "precio": 1,
-            "duracion_min": 1,
-            "profesional": {
-                "nombre": "$profesional.name",
-                "email": "$profesional.email"
-            },
-            "reviews": 1,
-            "reservations": 1
+            "id_profession": {"$toString": "$id_profession"},
+            "profession_name": "$profession.name",
+            "description": 1,
+            "estimated_price": 1,
+            "estimated_duration": 1,
+            "active": 1
+        }},
+        {"$sort": {"profession_name": 1, "description": 1}}
+    ]
+
+def service_by_id_pipeline(service_id: str) -> list:
+    return [
+        {"$match": {"_id": ObjectId(service_id)}},
+        {"$lookup": {
+            "from": "profession",
+            "localField": "id_profession",
+            "foreignField": "_id",
+            "as": "profession"
+        }},
+        {"$unwind": {"path": "$profession", "preserveNullAndEmptyArrays": True}},
+        {"$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "id_profession": {"$toString": "$id_profession"},
+            "profession_name": "$profession.name",
+            "description": 1,
+            "estimated_price": 1,
+            "estimated_duration": 1,
+            "active": 1
         }}
     ]
 
