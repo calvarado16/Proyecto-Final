@@ -11,7 +11,7 @@ class Profession(BaseModel):
         description="Nombre de la profesión"
     )
     
-    category: str = Field(
+    active: bool = Field(
         default=None,
-        description="Categoría o detalle del servicio"
+        description="true"
     )

@@ -1,46 +1,50 @@
-from pydantic import BaseModel, Field
 from typing import Optional
-import re
-
+from pydantic import BaseModel, Field
 
 class ServiceOffering(BaseModel):
-    id: str = Field(
-        id="_id", 
-        default=None, 
-        description="MongoDB ID"
-        )
     
-    id_profesional: str = Field( 
-        description="ID del profesional que ofrece el servicio"
-        )
-    
-    description: str = Field( 
+    id: Optional[str] = Field(
+        default=None,
+        alias="_id",
+        description="MongoDB ObjectId (hex) como string"
+    )
+
+    id_profession: str = Field(
+        ...,
+        description="ObjectId (hex) de la profesión relacionada"
+    )
+
+    description: str = Field(
+        ...,
+        min_length=3,
         description="Descripción del servicio"
-        )
-    
-    price_per_hour: float = Field( 
-        gt=0, 
-        description="Precio por hora del servicio"
-        )
-    estimate_work_time: str = Field(
-        description="Tiempo estimado de trabajo (ej: '2 horas')"
-        )
-    work_type: str = Field(
-        description="Tipo de trabajo "
-        )
+    )
+
+    estimated_price: int = Field(
+        ...,
+        ge=0,
+        description="Precio estimado del servicio (entero)"
+    )
+
+    estimated_duration: int = Field(
+        ...,
+        ge=1,
+        description="Duración estimada en minutos"
+    )
+
     active: bool = Field(
-        default=True, 
-        description="Indica si el servicio está activo o no"
-        )
+        default=True,
+        description="Indica si el servicio está activo"
+    )
 
     class Config:
+        allow_population_by_field_name = True
         schema_extra = {
             "example": {
-                "id_profesional": "60f6e6e1f2954b0c2e4e9e88",
+                "id_profession": "60f6e6e1f2954b0c2e4e9e88",
                 "description": "Reparación de computadoras a domicilio",
-                "price_per_hour": 25.5,
-                "estimate_work_time": "2 horas",
-                "work_type": "presencial",
+                "estimated_price": 500,
+                "estimated_duration": 90,
                 "active": True
             }
         }

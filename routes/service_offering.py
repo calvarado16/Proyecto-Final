@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, status, Path
 from models.service_offering import ServiceOffering
 from controllers import service_offering as controller
-from utils.security import validateuser, validateadmin, validateadmin_or_profesional
+from utils.security import validateuser, validateadmin
 
 router = APIRouter(prefix="/service_offerings", tags=["Service Offerings"])
 
@@ -9,7 +9,8 @@ router = APIRouter(prefix="/service_offerings", tags=["Service Offerings"])
 # Crear una oferta de servicio (Admin o Profesional)
 # ============================
 @router.post("/", status_code=status.HTTP_201_CREATED)
-@validateadmin_or_profesional
+@validateadmin
+@validateuser
 async def create_service_offering_route(service: ServiceOffering, request: Request):
     return await controller.create_service_offering(service)
 
@@ -33,7 +34,8 @@ async def get_service_offering_by_id_route(id: str, request: Request):
 # 🔧 Actualizar oferta (Admin o Profesional dueño)
 # ============================
 @router.put("/{id}", response_model=dict)
-@validateadmin_or_profesional
+@validateadmin
+@validateuser
 async def update_service_offering_route(
     id: str,
     service: ServiceOffering,
@@ -52,6 +54,7 @@ async def update_service_offering_route(
 # ============================
 @router.delete("/{id}")
 @validateadmin
+@validateuser
 async def delete_service_offering_route(id: str, request: Request):
     return await controller.delete_service_offering(id)
 

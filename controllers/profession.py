@@ -1,100 +1,80 @@
-import os
-import logging
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
 from fastapi import HTTPException
-from dotenv import load_dotenv
-from bson.objectid import ObjectId
-
+from bson import ObjectId
+from utils.mongodb import get_collection
 from models.profession import Profession
 
-load_dotenv()
+col = get_collection("profession")
 
-DB = os.getenv("MONGO_DB_NAME")
-URI = os.getenv("URI")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def get_collection(uri, col):
-    client = MongoClient(
-        uri,
-        server_api=ServerApi("1"),
-        tls=True,
-        tlsAllowInvalidCertificates=True
-    )
-    client.admin.command("ping")
-    return client[DB][col]
-
-# ===============================
-# Crear una profesión
-# ===============================
-async def create_profession(profession: Profession) -> Profession:
-    coll = get_collection(URI, "professions")
-    try:
-        new_doc = profession.model_dump(exclude={"id"})
-        result = coll.insert_one(new_doc)
-        profession.id = str(result.inserted_id)
-        return profession
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ===============================
-# Obtener todas las profesiones
-# ===============================
-async def get_all_professions():
-    coll = get_collection(URI, "professions")
-    professions = list(coll.find())
-    for p in professions:
-        p["id"] = str(p["_id"])
-        del p["_id"]
-    return professions
-
-# ===============================
-# Obtener profesión por ID
-# ===============================
-async def get_profession_by_id(profession_id: str) -> Profession:
-    coll = get_collection(URI, "professions")
-    if not ObjectId.is_valid(profession_id):
-        raise HTTPException(status_code=400, detail="ID de profesion invalido")
-
-    doc = coll.find_one({"_id": ObjectId(profession_id)})
+def _to_out(doc):
     if not doc:
-        raise HTTPException(status_code=404, detail="No se encontro profesion")
+        return None
+    doc["id"] = str(doc.pop("_id"))
+    if "created_by" in doc and doc["created_by"] is not None:
+        doc["created_by"] = str(doc["created_by"])
+    return doc
 
-    doc["id"] = str(doc["_id"])
-    del doc["_id"]
-    return Profession(**doc)
+async def list_professions_active():
+    return [_to_out(d) for d in col.find({"active": True})]
 
-# ===============================
-# Actualizar una profesión
-# ===============================
-async def update_profession(profession_id: str, profession: Profession) -> dict:
-    coll = get_collection(URI, "professions")
-    if not ObjectId.is_valid(profession_id):
-        raise HTTPException(status_code=400, detail="ID de profesion invalido")
+async def create_profession(prof: Profession, *, actor_id: str):
+    try:
+        owner = ObjectId(actor_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid actor id")
 
-    updated_data = profession.model_dump(exclude={"id"})
-    result = coll.update_one({"_id": ObjectId(profession_id)}, {"$set": updated_data})
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="No se encontro profesion")
+    res = col.insert_one({
+        "name": prof.name,
+        "active": prof.active,
+        "created_by": owner
+    })
+    return _to_out(col.find_one({"_id": res.inserted_id}))
 
-    return {"message": "Se actualizo la profesion de manera exitosa"}
+async def update_profession(id: str, prof: Profession, *, actor_id: str, is_admin: bool):
+    try:
+        _id = ObjectId(id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid id")
 
-# ===============================
-# Eliminar una profesión
-# ===============================
-async def delete_profession(profession_id: str) -> dict:
-    coll = get_collection(URI, "professions")
-    if not ObjectId.is_valid(profession_id):
-        raise HTTPException(status_code=400, detail="ID de profesion invalido")
+    current = col.find_one({"_id": _id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Profession not found")
 
-    result = coll.delete_one({"_id": ObjectId(profession_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="No se encontro la profesion")
+    # Solo dueño o admin
+    if not is_admin:
+        try:
+            actor = ObjectId(actor_id)
+        except:
+            raise HTTPException(status_code=400, detail="Invalid actor id")
+        if current.get("created_by") != actor:
+            raise HTTPException(status_code=403, detail="Not owner of this profession")
 
-    return {"message": "Se borro la profesion de manera exitosa"}
+    col.update_one({"_id": _id}, {"$set": {
+        "name": prof.name,
+        "active": prof.active
+    }})
+    return _to_out(col.find_one({"_id": _id}))
+
+async def delete_profession(id: str, *, actor_id: str, is_admin: bool):
+    try:
+        _id = ObjectId(id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid id")
+
+    current = col.find_one({"_id": _id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Profession not found")
+
+    if not is_admin:
+        try:
+            actor = ObjectId(actor_id)
+        except:
+            raise HTTPException(status_code=400, detail="Invalid actor id")
+        if current.get("created_by") != actor:
+            raise HTTPException(status_code=403, detail="Not owner of this profession")
+
+    col.update_one({"_id": _id}, {"$set": {"active": False}})
+    return {"ok": True}
+
 
 
 

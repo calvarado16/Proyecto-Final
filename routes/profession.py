@@ -1,52 +1,37 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request, status, Path
 from models.profession import Profession
-from controllers.profession import (
-    create_profession,
-    get_all_professions,
-    get_profession_by_id,
-    update_profession,
-    delete_profession
-)
-from utils.security import validateadmin
+from controllers import profession as controller
+from utils.security import validateuser
 
 router = APIRouter(prefix="/profession", tags=["Profession"])
 
-# ============================
-# Crear profesión
-# ============================
-@router.post("/", response_model=Profession)
-@validateadmin
-async def create_profession_endpoint(request: Request, profession: Profession) -> Profession:
-    return await create_profession(profession)
-
-# ============================
-# Obtener todas las profesiones
-# ============================
 @router.get("/", response_model=list[Profession])
-async def get_all_professions_endpoint() -> list[Profession]:
-    return await get_all_professions()
+@validateuser
+async def list_professions(request: Request):
+    return await controller.list_professions_active()
 
-# ============================
-# Obtener una profesión por ID
-# ============================
-@router.get("/{profession_id}", response_model=Profession)
-async def get_profession_by_id_endpoint(profession_id: str) -> Profession:
-    return await get_profession_by_id(profession_id)
+@router.post("/", status_code=status.HTTP_201_CREATED)
+@validateuser
+async def create_profession(prof: Profession, request: Request):
+    return await controller.create_profession(prof, actor_id=request.state.id)
 
-# ============================
-# Actualizar una profesión
-# ============================
-@router.put("/{profession_id}", response_model=dict)
-@validateadmin
-async def update_profession_endpoint(request: Request, profession_id: str, profession: Profession) -> dict:
-    return await update_profession(profession_id, profession)
+@router.put("/{id}")
+@validateuser
+async def update_profession(id: str, prof: Profession, request: Request):
+    return await controller.update_profession(
+        id,
+        prof,
+        actor_id=request.state.id,
+        is_admin=bool(getattr(request.state, "admin", False))
+    )
 
-# ============================
-# Eliminar una profesión
-# ============================
-@router.delete("/{profession_id}", response_model=dict)
-@validateadmin
-async def delete_profession_endpoint(request: Request, profession_id: str) -> dict:
-    return await delete_profession(profession_id)
+@router.delete("/{id}")
+@validateuser
+async def delete_profession(id: str, request: Request):
+    return await controller.delete_profession(
+        id,
+        actor_id=request.state.id,
+        is_admin=bool(getattr(request.state, "admin", False))
+    )
 
 
