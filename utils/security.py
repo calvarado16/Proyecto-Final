@@ -32,6 +32,8 @@ def create_jwt_token(
         "iat": now,
         "exp": now + timedelta(hours=1),
     }
+    if not SECRET_KEY:
+        raise RuntimeError("SECRET_KEY no configurado")
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 # -------------------------
@@ -51,7 +53,7 @@ def _get_request_from_args_kwargs(*args, **kwargs) -> Request:
 def _extract_bearer_token(req: Request) -> str:
     auth = req.headers.get("Authorization")
     if not auth:
-        raise HTTPException(status_code=400, detail="Authorization header missing")
+        raise HTTPException(status_code=401, detail="No autenticado")
     try:
         scheme, token = auth.split()
     except ValueError:
@@ -64,13 +66,17 @@ def _decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Expired token")
+        raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 def _attach_user_to_request(req: Request, payload: dict) -> None:
+    # 🔹 Compatibilidad con controladores que esperan request.state.user
+    req.state.user = payload
+
+    # 🔹 Campos individuales
     req.state.id = payload.get("id")
-    req.state.user_id = payload.get("id")       # alias para compatibilidad
+    req.state.user_id = payload.get("id")
     req.state.email = payload.get("email")
     req.state.firstname = payload.get("firstname")
     req.state.lastname = payload.get("lastname")
@@ -111,4 +117,5 @@ def validateadmin(func):
         _attach_user_to_request(req, payload)
         return await func(*args, **kwargs)
     return wrapper
+
 
