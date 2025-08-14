@@ -1,43 +1,29 @@
 import re
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, EmailStr
 from typing import Optional 
 
-
 class User(BaseModel):
-    
-    id: str = Field(
-        default=None,
-        description="MongoDB ID"
-    )
-    
+    id: Optional[str] = Field(default=None, description="MongoDB ID")
+
     name: str = Field(
         description="User First name",
-        pattern= r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]+$"
+        pattern=r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]+$"
     )
-    
+
     lastname: str = Field(
         description="User Last Name",
-        pattern= r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]+$",
+        pattern=r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]+$"
+    )
 
-    )
-    
-    email:str = Field(
-        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    )
-    
-    active: bool = Field(
-        default=True
-    )
-    
-    admin: bool = Field(
-        default=False
-    )
-        
+    email: EmailStr
+
+    active: bool = Field(default=True)
+    admin: bool = Field(default=False)
+
     password: str = Field(
         min_length=8,
         max_length=64,
         description="Contraseña del usuario, debe tener entre 8 y 64 caracteres incluir por lo menos un numero, por lo menos una mayuscula y por lo menos un caracter especial.",
-
     )
 
     @field_validator('password')
