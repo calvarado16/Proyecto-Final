@@ -115,7 +115,6 @@ async def login(login_data: Login) -> dict:
             lastname=user_info.get("lastname"),
             email=user_info.get("email"),
             active=user_info.get("active", True),
-            profesional=user_info.get("profesional", False),
             admin=user_info.get("admin", False),
         ),
     }
