@@ -12,6 +12,6 @@ class Profession(BaseModel):
     )
     
     active: bool = Field(
-        default=None,
-        description="true"
+        default=True,
+        description="Estado de la profesion (activo/desactivo)"
     )
