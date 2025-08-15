@@ -48,7 +48,6 @@ async def create_profession(prof: Profession, request: Request):
         raise HTTPException(status_code=400, detail="La profesión ya existe")
 
     payload = prof.model_dump(exclude={"id"})
-    # asegúrate de guardar active y trazas
     payload.setdefault("active", True)
     payload["created_by"] = user.get("id")
     payload["created_at"] = datetime.utcnow()
@@ -101,7 +100,6 @@ async def update_profession(id: str, prof: Profession, request: Request):
         )
 
     payload = prof.model_dump(exclude_unset=True, exclude={"id", "created_by"})
-    # Evita cambiar nombre a duplicado
     if "name" in payload:
         dup = col_professions.find_one({"name": payload["name"], "_id": {"$ne": oid}})
         if dup:
@@ -133,12 +131,14 @@ async def delete_profession_safe(id: str, request: Request):
         raise HTTPException(status_code=404, detail="Profesión no encontrada")
 
     is_admin = bool(user.get("admin"))
-    is_owner = str(prof.get("created_by")) == str(user.get("id"))
+    created_by = prof.get("created_by")
+    is_owner = created_by is not None and str(created_by) == str(user.get("id"))
+
     if not (is_admin or is_owner):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo el creador o un administrador puede eliminar esta profesión",
-        )
+        detail = "Solo el creador o un administrador puede eliminar esta profesión"
+        if created_by is None:
+            detail += " (este registro no tiene 'created_by', contacte a un administrador)"
+        raise HTTPException(status_code=403, detail=detail)
 
     # Dependencias: aceptar ObjectId o string en id_profession
     deps = col_services.count_documents({
@@ -149,7 +149,6 @@ async def delete_profession_safe(id: str, request: Request):
     })
 
     if deps > 0:
-        # Soft delete
         col_professions.update_one(
             {"_id": oid},
             {"$set": {"active": False, "updated_at": datetime.utcnow()}}
@@ -161,7 +160,6 @@ async def delete_profession_safe(id: str, request: Request):
             "linked_services": int(deps),
         }
 
-    # Hard delete
     res = col_professions.delete_one({"_id": oid})
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Profesión no encontrada")
@@ -189,6 +187,13 @@ async def validate_profession_is_assigned(id: str, request: Request):
     if not getattr(request.state, "user", None):
         raise HTTPException(status_code=401, detail="No autenticado")
     return list(col_professions.aggregate(validate_profession_is_assigned_pipeline(id)))
+
+
+# ---- Alias para compatibilidad ----
+async def get_professions(include_inactive: bool, request: Request):
+    """Alias de get_all_professions para compatibilidad"""
+    return await get_all_professions(include_inactive, request)
+
 
 
 
