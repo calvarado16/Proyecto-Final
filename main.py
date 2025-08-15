@@ -1,24 +1,22 @@
+# main.py
 import os
 import uvicorn
 import logging
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
 
-# Controladores y modelos
+# Controladores y modelos (login/registro)
 from controllers.users import create_user, login
 from models.users import User
 from models.login import Login
 
-# Seguridad
-from utils.security import create_jwt_token, validateuser, validateadmin
-
-# Routers
-from routes.service_offering import router as service_offering_router
-from routes.reservation import router as reservation_router
-from routes.profession import router as profession_router
-from routes.review import router as review_router
-from routes.service_review import router as service_review_router
-from routes.public_profession import router as public_profession_router
+# Routers: importa por MÓDULO y luego usa .router
+import routes.reservation as reservation_routes
+import routes.profession as profession_routes
+import routes.service_offering as service_offering_routes
+import routes.review as review_routes
+import routes.service_review as service_review_routes
+import routes.public_profession as public_profession_routes
 
 # MongoDB
 from utils.mongodb import t_connection
@@ -38,8 +36,8 @@ app = FastAPI()
 # ============================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Ajusta en producción
-    allow_credentials=False, #MODIFICAR DESPUES
+    allow_origins=["*"],           # Ajusta en producción
+    allow_credentials=False,       # Ajusta en producción si usas cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -47,12 +45,12 @@ app.add_middleware(
 # ============================
 # Routers
 # ============================
-app.include_router(reservation_router)
-app.include_router(profession_router)
-app.include_router(service_offering_router)
-app.include_router(review_router)
-app.include_router(service_review_router)
-app.include_router(public_profession_router)
+app.include_router(reservation_routes.router)
+app.include_router(profession_routes.router)
+app.include_router(service_offering_routes.router)
+app.include_router(review_routes.router)
+app.include_router(service_review_routes.router)
+app.include_router(public_profession_routes.router)
 
 # ============================
 # Personalización OpenAPI
@@ -73,6 +71,7 @@ def custom_openapi():
             "bearerFormat": "JWT",
         }
     }
+    # Nota: esto sólo afecta a la documentación; no aplica auth real.
     for path in openapi_schema["paths"].values():
         for method in path.values():
             method["security"] = [{"BearerAuth": []}]
@@ -101,7 +100,7 @@ def health_check():
             "status": "healthy",
             "timestamp": "2025-08-11",
             "service": "servicios-api",
-            "environment": "production"
+            "environment": "production",
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
@@ -119,7 +118,7 @@ def readiness_check():
         return {"status": "unhealthy", "error": str(e)}
 
 # ============================
-# Endpoints de usuarios
+# Endpoints de usuarios (públicos)
 # ============================
 @app.post("/users")
 async def create_user_endpoint(user: User) -> User:
@@ -133,14 +132,11 @@ async def create_user_endpoint(user: User) -> User:
 async def login_access(l: Login):
     return await login(l)
 
-
-    return {"email": email, "found": bool(u), "doc": _serialize_user(u)}
-
-
 # ============================
 # Arranque
 # ============================
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
 
 

@@ -1,49 +1,66 @@
-# controllers/profession.py
-from fastapi import HTTPException
-from bson import ObjectId
-from utils.mongodb import get_collection
+# routes/profession.py
+from fastapi import APIRouter, Request, status, Query, Path
+from models.profession import Profession
+from controllers import profession as controller
+from utils.security import validateuser
 
+# Define el router de inmediato, a nivel de módulo
+router = APIRouter(prefix="/profession", tags=["Profession"])
 
-async def delete_profession_safe(id: str, request=None) -> dict:
-    """
-    Si la profesión tiene servicios asociados en 'service_offering',
-    se desactiva (soft delete). Si no, se elimina definitivamente.
-    """
-    prof_coll = get_collection("profession")
-    serv_coll = get_collection("service_offering")
+@router.post("/", status_code=status.HTTP_201_CREATED)
+@validateuser
+async def create_profession_route(body: Profession, request: Request):
+    return await controller.create_profession(body, request)
 
-    # Validar ObjectId
-    try:
-        oid = ObjectId(id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="ID inválido")
+@router.get("/")
+@validateuser
+async def get_all_professions_route(
+    request: Request,
+    include_inactive: bool = Query(False, description="Incluir inactivas"),
+):
+    return await controller.get_all_professions(include_inactive, request)
 
-    # ¿Existe la profesión?
-    prof = prof_coll.find_one({"_id": oid})
-    if not prof:
-        raise HTTPException(status_code=404, detail="Profesión no encontrada")
+@router.get("/{id}")
+@validateuser
+async def get_profession_by_id_route(
+    id: str = Path(..., description="ID de la profesión"),
+    request: Request = None,
+):
+    return await controller.get_profession_by_id(id, request)
 
-    # Verificar dependencias (servicios relacionados)
-    deps = serv_coll.count_documents({"id_profession": oid})
+@router.put("/{id}")
+@validateuser
+async def update_profession_route(id: str, body: Profession, request: Request):
+    return await controller.update_profession(id, body, request)
 
-    if deps > 0:
-        # Soft delete: marcar inactiva si hay dependencias
-        prof_coll.update_one({"_id": oid}, {"$set": {"active": False}})
-        return {
-            "message": "La profesión está en uso, se desactivó.",
-            "softDisabled": True,
-            "dependencies": int(deps),
-        }
+@router.delete("/{id}")
+@validateuser
+async def delete_profession_route(id: str, request: Request):
+    return await controller.delete_profession_safe(id, request)
 
-    # Sin dependencias: eliminación definitiva
-    res = prof_coll.delete_one({"_id": oid})
-    if not res.deleted_count:
-        raise HTTPException(status_code=404, detail="Profesión no encontrada")
+# Endpoints extra opcionales
+@router.get("/with-service-count")
+@validateuser
+async def professions_with_service_count_route(request: Request):
+    return await controller.professions_with_service_count(request)
 
-    return {
-        "message": "Profesión eliminada correctamente.",
-        "softDisabled": False,
-    }
+@router.get("/search")
+@validateuser
+async def search_professions_route(
+    q: str = Query(..., description="Texto a buscar en nombre"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=200),
+    request: Request = None,
+):
+    return await controller.search_professions(q, skip, limit, request)
+
+@router.get("/{id}/validate-assigned")
+@validateuser
+async def validate_profession_assigned_route(id: str, request: Request):
+    return await controller.validate_profession_is_assigned(id, request)
+
+__all__ = ["router"]
+
 
 
 

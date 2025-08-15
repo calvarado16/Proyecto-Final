@@ -97,29 +97,65 @@ async def update_profession(id: str, prof: Profession, request: Request):
     updated["id"] = str(updated["_id"]); updated.pop("_id", None)
     return updated
 
-# ---------- DELETE (con validación opcional) ----------
+# ---------- DELETE (soft delete si hay dependencias) ----------
 async def delete_profession_safe(id: str, request: Request):
+    """
+    Si la profesión tiene servicios asociados en 'service_offering',
+    se desactiva (active=False). Si no, se elimina definitivamente.
+    Requiere ser admin o el creador.
+    """
+    # Auth (usa lo que coloca validateuser en request.state.user)
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=401, detail="No autenticado")
 
+    # Validar ObjectId
     try:
         oid = ObjectId(id)
     except Exception:
         raise HTTPException(status_code=400, detail="ID inválido")
 
+    # ¿Existe la profesión?
     prof = col_professions.find_one({"_id": oid})
     if not prof:
         raise HTTPException(status_code=404, detail="Profession no encontrada")
 
+    # Permisos: admin o creador
     is_admin = bool(user.get("admin"))
     is_owner = str(prof.get("created_by")) == str(user.get("id"))
     if not (is_admin or is_owner):
-        raise HTTPException(status_code=403, detail="Solo el creador o un administrador puede eliminar esta profesión")
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el creador o un administrador puede eliminar esta profesión",
+        )
 
+    # Dependencias (acepta id_profession como ObjectId o como string)
+    serv_coll = get_collection("service_offering")
+    deps = serv_coll.count_documents({
+        "$or": [
+            {"id_profession": oid},
+            {"id_profession": str(oid)},
+        ]
+    })
 
-    col_professions.delete_one({"_id": oid})
-    return {"deleted": True, "id": id}
+    if deps > 0:
+        # Soft delete: desactivar si está en uso
+        col_professions.update_one({"_id": oid}, {"$set": {"active": False}})
+        return {
+            "message": "La profesión está en uso, se desactivó.",
+            "softDisabled": True,
+            "dependencies": int(deps),
+        }
+
+    # Sin dependencias: eliminación definitiva
+    res = col_professions.delete_one({"_id": oid})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Profesión no encontrada")
+
+    return {
+        "message": "Profesión eliminada correctamente.",
+        "softDisabled": False,
+    }
 
 # ---------- PIPELINE ENDPOINTS AUX ----------
 async def professions_with_service_count(request: Request):
@@ -136,6 +172,7 @@ async def validate_profession_is_assigned(id: str, request: Request):
     if not getattr(request.state, "user", None):
         raise HTTPException(status_code=401, detail="No autenticado")
     return list(col_professions.aggregate(validate_profession_is_assigned_pipeline(id)))
+
 
 
    
