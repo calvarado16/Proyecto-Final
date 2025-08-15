@@ -32,7 +32,6 @@ def _list_pipeline(*, active_only: bool = True, owner_id: str | None = None):
         try:
             match["created_by"] = ObjectId(owner_id)
         except Exception:
-            # si viene mal, ignoramos el filtro de dueño
             pass
 
     return [

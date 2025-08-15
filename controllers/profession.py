@@ -6,7 +6,7 @@ from datetime import datetime
 from utils.mongodb import get_collection
 from models.profession import Profession
 
-# Pipelines existentes
+# === Pipelines (los que enviaste) ===
 from pipelines.profession_pipelines import (
     get_all_professions_pipeline,
     get_profession_with_service_count_pipeline,
@@ -16,8 +16,8 @@ from pipelines.profession_type_pipelines import (
     validate_profession_is_assigned_pipeline,
 )
 
-col_professions = get_collection("profession")
-col_services = get_collection("service_offering")  # <- usado para dependencias
+coll = get_collection("profession")
+services_coll = get_collection("service_offering")  # opcional para conteos directos
 
 
 # ------------------------------
@@ -39,42 +39,35 @@ def _serialize(doc: dict) -> dict:
 
 # ---------- CREATE ----------
 async def create_profession(prof: Profession, request: Request):
-    user = getattr(request.state, "user", None)
-    if not user:
-        raise HTTPException(status_code=401, detail="No autenticado")
+    # (Si usas validateuser, aquí ya llega autenticado)
+    # Normalizar + validar duplicados
+    prof.name = prof.name.strip()
+    if getattr(prof, "description", None):
+        prof.description = prof.description.strip()
 
-    # Duplicado por nombre
-    if col_professions.find_one({"name": prof.name}):
+    if coll.find_one({"name": {"$regex": f"^{prof.name}$", "$options": "i"}}):
         raise HTTPException(status_code=400, detail="La profesión ya existe")
 
     payload = prof.model_dump(exclude={"id"})
     payload.setdefault("active", True)
-    payload["created_by"] = user.get("id")
-    payload["created_at"] = datetime.utcnow()
+    payload.setdefault("created_at", datetime.utcnow())
     payload["updated_at"] = datetime.utcnow()
 
-    res = col_professions.insert_one(payload)
-    created = col_professions.find_one({"_id": res.inserted_id})
+    res = coll.insert_one(payload)
+    created = coll.find_one({"_id": res.inserted_id})
     return _serialize(created)
 
 
 # ---------- READ LIST (via pipeline) ----------
 async def get_all_professions(include_inactive: bool, request: Request):
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=401, detail="No autenticado")
 
-    pipeline = get_all_professions_pipeline(
-        skip=0, limit=10_000, include_inactive=include_inactive
-    )
-    return list(col_professions.aggregate(pipeline))
+    pipeline = get_all_professions_pipeline(skip=0, limit=10_000, include_inactive=include_inactive)
+    return list(coll.aggregate(pipeline))
 
 
 # ---------- READ ONE ----------
 async def get_profession_by_id(id: str, request: Request):
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=401, detail="No autenticado")
-
-    doc = col_professions.find_one({"_id": _to_oid(id)})
+    doc = coll.find_one({"_id": _to_oid(id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Profesión no encontrada")
     return _serialize(doc)
@@ -82,125 +75,77 @@ async def get_profession_by_id(id: str, request: Request):
 
 # ---------- UPDATE ----------
 async def update_profession(id: str, prof: Profession, request: Request):
-    user = getattr(request.state, "user", None)
-    if not user:
-        raise HTTPException(status_code=401, detail="No autenticado")
-
     oid = _to_oid(id)
-    current = col_professions.find_one({"_id": oid})
+    current = coll.find_one({"_id": oid})
     if not current:
         raise HTTPException(status_code=404, detail="Profesión no encontrada")
 
-    is_admin = bool(user.get("admin"))
-    is_owner = str(current.get("created_by")) == str(user.get("id"))
-    if not (is_admin or is_owner):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo el creador o un administrador puede actualizar esta profesión",
-        )
+    # Normalizar + validar duplicados
+    prof.name = prof.name.strip()
+    if getattr(prof, "description", None):
+        prof.description = prof.description.strip()
 
-    payload = prof.model_dump(exclude_unset=True, exclude={"id", "created_by"})
-    if "name" in payload:
-        dup = col_professions.find_one({"name": payload["name"], "_id": {"$ne": oid}})
-        if dup:
-            raise HTTPException(status_code=400, detail="Ya existe otra profesión con ese nombre")
+    dup = coll.find_one({
+        "name": {"$regex": f"^{prof.name}$", "$options": "i"},
+        "_id": {"$ne": oid}
+    })
+    if dup:
+        raise HTTPException(status_code=400, detail="Ya existe otra profesión con ese nombre")
 
+    payload = prof.model_dump(exclude={"id"})
     payload["updated_at"] = datetime.utcnow()
 
-    col_professions.update_one({"_id": oid}, {"$set": payload})
-    updated = col_professions.find_one({"_id": oid})
+    coll.update_one({"_id": oid}, {"$set": payload})
+    updated = coll.find_one({"_id": oid})
     return _serialize(updated)
 
 
-# ---------- DELETE (Soft si hay dependencias) ----------
+# ---------- DELETE (SIEMPRE SOFT-DELETE) ----------
 async def delete_profession_safe(id: str, request: Request):
-    """
-    Borrado seguro:
-      - Si tiene servicios asociados -> desactivar (active=False).
-      - Si no tiene -> eliminar definitivamente.
-    Requiere admin o creador.
-    """
-    user = getattr(request.state, "user", None)
-    if not user:
-        raise HTTPException(status_code=401, detail="No autenticado")
 
     oid = _to_oid(id)
-
-    prof = col_professions.find_one({"_id": oid})
-    if not prof:
+    existing = coll.find_one({"_id": oid})
+    if not existing:
         raise HTTPException(status_code=404, detail="Profesión no encontrada")
 
-    is_admin = bool(user.get("admin"))
-    created_by = prof.get("created_by")
-    is_owner = created_by is not None and str(created_by) == str(user.get("id"))
+    # Conteo de servicios asociados vía pipeline (el que enviaste)
+    validation = list(coll.aggregate(validate_profession_is_assigned_pipeline(id)))
+    linked = 0
+    if validation:
+        linked = int(validation[0].get("number_of_services", 0))
 
-    if not (is_admin or is_owner):
-        detail = "Solo el creador o un administrador puede eliminar esta profesión"
-        if created_by is None:
-            detail += " (este registro no tiene 'created_by', contacte a un administrador)"
-        raise HTTPException(status_code=403, detail=detail)
-
-    # Dependencias: aceptar ObjectId o string en id_profession
-    deps = col_services.count_documents({
-        "$or": [
-            {"id_profession": oid},
-            {"id_profession": str(oid)},
-        ]
-    })
-
-    if deps > 0:
-        col_professions.update_one(
-            {"_id": oid},
-            {"$set": {"active": False, "updated_at": datetime.utcnow()}}
-        )
-        return {
-            "status": "deactivated",
-            "message": "La profesión tiene servicios asociados; se desactivó en lugar de eliminarse.",
-            "id": id,
-            "linked_services": int(deps),
-        }
-
-    res = col_professions.delete_one({"_id": oid})
-    if not res.deleted_count:
-        raise HTTPException(status_code=404, detail="Profesión no encontrada")
+    # Soft delete: active=False
+    coll.update_one(
+        {"_id": oid},
+        {"$set": {"active": False, "updated_at": datetime.utcnow()}}
+    )
 
     return {
-        "status": "deleted",
-        "message": "Profesión eliminada definitivamente (no tenía servicios asociados).",
+        "status": "deactivated",
+        "message": "La profesión se desactivó correctamente (no se elimina físicamente).",
         "id": id,
-        "linked_services": 0,
+        "linked_services": linked,
     }
 
 
 # ---------- PIPELINE ENDPOINTS AUX ----------
 async def professions_with_service_count(request: Request):
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=401, detail="No autenticado")
-    return list(col_professions.aggregate(get_profession_with_service_count_pipeline()))
+ 
+    return list(coll.aggregate(get_profession_with_service_count_pipeline()))
 
 async def search_professions(q: str, skip: int, limit: int, request: Request):
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=401, detail="No autenticado")
-    return list(col_professions.aggregate(search_professions_pipeline(q, skip, limit)))
+
+    return list(coll.aggregate(search_professions_pipeline(q, skip, limit)))
 
 async def validate_profession_is_assigned(id: str, request: Request):
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=401, detail="No autenticado")
-    return list(col_professions.aggregate(validate_profession_is_assigned_pipeline(id)))
+
+    result = list(coll.aggregate(validate_profession_is_assigned_pipeline(id)))
+    if not result:
+        raise HTTPException(status_code=404, detail="Profesión no encontrada")
+    # El pipeline ya proyecta con id/name/active/number_of_services
+    return result[0]
 
 
-# ---- Alias para compatibilidad ----
+# ---- Alias para compatibilidad (si algún router antiguo lo importa) ----
 async def get_professions(include_inactive: bool, request: Request):
-    """Alias de get_all_professions para compatibilidad"""
     return await get_all_professions(include_inactive, request)
-
-
-
-
-
-   
-
-
-
-
-
